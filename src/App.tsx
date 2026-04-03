@@ -111,25 +111,23 @@ export default function App() {
       const uniqueWords = Array.from(new Set(extractedWords)).slice(0, 10);
       setFileQueue(prev => prev.map(f => f.id === fileId ? { ...f, status: 'processing', total: uniqueWords.length } : f));
 
-      // Parallel processing for words within a file to make it faster
+      // Sequential processing for words within a file to avoid rate limits
       const processedResults: WordData[] = [];
-      const wordPromises = uniqueWords.map(async (currentWord) => {
+      for (const currentWord of uniqueWords) {
         try {
+          // Add a small delay between words to be extra safe with rate limits
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
           const [details, imageUrl] = await Promise.all([
             fetchWordDetails(currentWord),
             generateWordImage(currentWord)
           ]);
-          setFileQueue(prev => prev.map(f => f.id === fileId ? { ...f, current: f.current + 1 } : f));
-          return { ...details, imageUrl };
+          processedResults.push({ ...details, imageUrl });
         } catch (err) {
           console.warn(`Failed to process word: ${currentWord}`, err);
-          setFileQueue(prev => prev.map(f => f.id === fileId ? { ...f, current: f.current + 1 } : f));
-          return null;
         }
-      });
-
-      const results = await Promise.all(wordPromises);
-      processedResults.push(...(results.filter(r => r !== null) as WordData[]));
+        setFileQueue(prev => prev.map(f => f.id === fileId ? { ...f, current: f.current + 1 } : f));
+      }
 
       setFileQueue(prev => prev.map(f => f.id === fileId ? { ...f, status: 'completed' } : f));
       return processedResults;
@@ -150,10 +148,13 @@ export default function App() {
     setFileQueue([]);
 
     try {
-      // Process files in parallel for even more speed
-      const filePromises = files.map(file => processFile(file));
-      const allFileResults = await Promise.all(filePromises);
-      const allProcessedResults = allFileResults.flat();
+      const allProcessedResults: WordData[] = [];
+      
+      // Process files sequentially to avoid hitting rate limits
+      for (const file of files) {
+        const fileResults = await processFile(file);
+        allProcessedResults.push(...fileResults);
+      }
 
       setResults(allProcessedResults);
     } catch (err) {
